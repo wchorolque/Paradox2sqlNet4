@@ -114,24 +114,26 @@ namespace Paradox2sql
             }
         }
 
-        private static string GenerateSqlCreateTableScript(DataTable table)
+        private static string GenerateSqlCreateTableScript(DataTable tableToCreate)
         {
-            var result = "CREATE TABLE [" + table.TableName + "] (";
+            var result = "CREATE TABLE [" + tableToCreate.TableName + "] (";
 
-            for (var i = 0; i < table.Columns.Count; i++)
+            for (var i = 0; i < tableToCreate.Columns.Count; i++)
             {
-                result += "\n [" + table.Columns[i].ColumnName + "] ";
-                if (table.Columns[i].DataType.ToString().Contains("System.Int32"))
+                DataColumn tableColumn = tableToCreate.Columns[i];
+                result += "\n [" + tableColumn.ColumnName + "] ";
+                /// TODO: Use System.Double to real/double and Memo to String
+                if (tableColumn.DataType.ToString().Contains("System.Int32"))
                     result += " int ";
-                else if (table.Columns[i].DataType.ToString().Contains("System.DateTime"))
+                else if (tableColumn.DataType.ToString().Contains("System.DateTime"))
                     result += " datetime ";
                 else
                     result += " nvarchar(255) ";
 
-                if (table.Columns[i].AutoIncrement)
-                    result += " IDENTITY(" + table.Columns[i].AutoIncrementSeed.ToString() + "," + table.Columns[i].AutoIncrementStep.ToString() + ") ";
+                if (tableColumn.AutoIncrement)
+                    result += " IDENTITY(" + tableColumn.AutoIncrementSeed.ToString() + "," + tableColumn.AutoIncrementStep.ToString() + ") ";
 
-                if (!table.Columns[i].AllowDBNull)
+                if (!tableColumn.AllowDBNull)
                     result += " NOT NULL ";
 
                 result += ",";
@@ -189,45 +191,53 @@ namespace Paradox2sql
                 var tableName = Path.GetFileNameWithoutExtension(f);
                 try
                 {
-                    using (var paradoxConnection = new OleDbConnection(string.Format("Provider=Microsoft.Jet.OLEDB.4.0;Extended Properties=Paradox 5.x;Data Source={0};", paradoxLocationTextBox.Text)))
+                    using (var paradoxConnection = new OleDbConnection(string.Format("Provider=Microsoft.Jet.OLEDB.4.0;Extended Properties=Paradox 4.x;Data Source={0};", paradoxLocationTextBox.Text)))
                     {
                         using (var da = new OleDbDataAdapter(string.Format("SELECT * FROM {0};", tableName), paradoxConnection))
                         {
-                            var table = new DataTable(tableName);
+                            var tableToImport = new DataTable(tableName);
                             paradoxConnection.Open();
-                            da.Fill(table);
-                            var createquery = GenerateSqlCreateTableScript(table);
+                            da.Fill(tableToImport);
+                            var createTablequery = GenerateSqlCreateTableScript(tableToImport);
                             using (SqlConnection connection = new SqlConnection(SqlConnectionString))
                             {
-                                using (var adapter = new SqlDataAdapter(createquery, connection))
+                                using (var adapter = new SqlDataAdapter(createTablequery, connection))
                                 {
                                     if (connection.State != ConnectionState.Open)
                                         connection.Open();
 
-                                    LogInfo("Creating table {0}.", tableName);
-                                    adapter.SelectCommand.ExecuteNonQuery();
-                                    LogInfo("Importing table {0}.", tableName);
-
-                                    foreach (DataRow row in table.Rows)
+                                    if (this.chkCrearTablas.Checked)
                                     {
-                                        // This will not always work. The paradox data can not be trusted
-                                        //var values = string.Join(",", row.ItemArray.Select(v => "'" + v.ToString().Replace("'", string.Empty) + "'").ToArray());
-                                        /* Validate every field, and use null if not valid.
-                                         * Slower, but safer. */
-                                        var validatedData = new List<object>();
-                                        for (var i = 0; i < row.Table.Columns.Count; i++)
-                                        {
-                                            Type dataType = row.Table.Columns[i].DataType;
-                                            var value = ConvertTo(row[i], dataType);
-                                            validatedData.Add(value);
-                                        }
-
-                                        var values = string.Join(",", validatedData.Select(v => "'" + v.ToString().Replace("'", string.Empty) + "'").ToArray());
-                                        adapter.InsertCommand = new SqlCommand("INSERT INTO [" + tableName + "] VALUES (" + values + ")", connection);
-                                        adapter.InsertCommand.ExecuteNonQuery();
+                                        LogInfo("Creating table {0}.", tableName);
+                                        adapter.SelectCommand.ExecuteNonQuery();
                                     }
 
-                                    LogInfo("Imported table {0} correctly.", tableName);
+                                    if (this.chkCopiarDatos.Checked)
+                                    {
+                                        LogInfo("Importing table {0}.", tableName);
+                                        int count = 0;
+                                        foreach (DataRow row in tableToImport.Rows)
+                                        {
+                                            // This will not always work. The paradox data can not be trusted
+                                            //var values = string.Join(",", row.ItemArray.Select(v => "'" + v.ToString().Replace("'", string.Empty) + "'").ToArray());
+                                            /* Validate every field, and use null if not valid.
+                                             * Slower, but safer. */
+                                            var validatedData = new List<object>();
+                                            for (var i = 0; i < row.Table.Columns.Count; i++)
+                                            {
+                                                Type dataType = row.Table.Columns[i].DataType;
+                                                var value = ConvertTo(row[i], dataType);
+                                                validatedData.Add(value);
+                                            }
+
+                                            var values = string.Join(",", validatedData.Select(v => "'" + v.ToString().Replace("'", string.Empty) + "'").ToArray());
+                                            adapter.InsertCommand = new SqlCommand("INSERT INTO [" + tableName + "] VALUES (" + values + ")", connection);
+                                            adapter.InsertCommand.ExecuteNonQuery();
+                                            count++;
+                                        }
+
+                                        LogInfo("Imported table {0} with {1} records correctly.", tableName, count);
+                                    }
                                     //Task.Yield();
                                 }
                             }
@@ -239,7 +249,10 @@ namespace Paradox2sql
                     LogInfo(sex.Message);
                     return;
                 }
-                catch (Exception ex) { LogInfo(ex.Message); }
+                catch (Exception ex) 
+                { 
+                    LogInfo(ex.Message); 
+                }
             }
         }
     }
